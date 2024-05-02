@@ -11,7 +11,23 @@ import (
 	probing "github.com/prometheus-community/pro-bing"
 )
 
+var version string = "dev"
+
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "-h", "--help":
+			fmt.Println("Usage: network-check")
+			os.Exit(0)
+		case "-v", "--version":
+			fmt.Println(version)
+			os.Exit(0)
+		default:
+			fmt.Printf("unknown option: %s\n", os.Args[1])
+			os.Exit(1)
+		}
+	}
+
 	gw, err := gateway.DiscoverGateway()
 	if err != nil {
 		fmt.Printf("cannot find gateway: %v\n", err)
