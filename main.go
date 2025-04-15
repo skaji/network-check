@@ -56,9 +56,9 @@ type result struct {
 }
 
 func (r *result) String() string {
-	ok := "OK"
+	ok := "\x1b[32mOK\x1b[m"
 	if !r.OK {
-		ok = "NG"
+		ok = "\x1b[31mNG\x1b[m"
 	}
 	return fmt.Sprintf("%s %s %s", ok, r.Type, r.Addr)
 }
@@ -122,7 +122,7 @@ func tcp(addrs ...string) {
 			defer wg.Done()
 			conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
 			if err == nil {
-				conn.Close()
+				_ = conn.Close()
 			}
 			out[i] = &result{Type: "tcp", OK: err == nil, Addr: addr}
 		}()
