@@ -44,75 +44,91 @@ func main() {
 	fmt.Printf("GW %s\n", gw.String())
 	fmt.Println("")
 
-	ping(gw.String())
-	ping("8.8.8.8")
-	resolve("www.google.com")
-	resolve2("www.google.com")
+	ping("1.1.1.1", "2606:4700:4700::1111", gw.String())
+	udp("1.1.1.1:53", "[2606:4700:4700::1111]:53", gw.String()+":53")
+	tcp("1.1.1.1:443", "[2606:4700:4700::1111]:443", gw.String()+":80")
 }
 
-func ping(addr string) {
-	pinger := probing.New(addr)
-	pinger.Count = 1
-	pinger.Timeout = time.Second
-	err := pinger.Run()
-	if err != nil {
-		fmt.Printf("NG ping %s (%v)\n", addr, err)
-		return
+type result struct {
+	OK   bool
+	Type string
+	Addr string
+}
+
+func (r *result) String() string {
+	ok := "OK"
+	if !r.OK {
+		ok = "NG"
 	}
-	stats := pinger.Statistics()
-	fmt.Printf("OK ping %s (%s)\n", addr, stats.AvgRtt.String())
+	return fmt.Sprintf("%s %s %s", ok, r.Type, r.Addr)
 }
 
-func resolve(domain string) {
-	var resolver *net.Resolver
+func ping(addrs ...string) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	ips, err := resolver.LookupIP(ctx, "ip", domain)
-	if err != nil {
-		fmt.Printf("NG resolve from local (%v)\n", err)
-		return
+
+	var wg sync.WaitGroup
+	wg.Add(len(addrs))
+	out := make([]*result, len(addrs))
+	for i, addr := range addrs {
+		go func() {
+			defer wg.Done()
+			pinger := probing.New(addr)
+			pinger.Count = 1
+			pinger.Timeout = time.Second
+			err := pinger.RunWithContext(ctx)
+			out[i] = &result{Type: "ping", OK: err == nil, Addr: addr}
+		}()
 	}
-	fmt.Printf("OK resolve from local (%s -> %s)\n", domain, ips[0])
+	wg.Wait()
+	for _, str := range out {
+		fmt.Println(str)
+	}
 }
 
-func resolve2(domain string) {
+func udp(addrs ...string) {
+	domain := "www.google.com"
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	client := &dns.Client{Timeout: time.Second}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		msg := &dns.Msg{}
-		msg.SetQuestion(dns.Fqdn(domain), dns.TypeA)
-		dnsServer := "1.1.1.1:53"
-		res, _, err := client.ExchangeContext(ctx, msg, dnsServer)
-		if err != nil {
-			fmt.Printf("NG resolve from %s (%v)\n", dnsServer, err)
-			return
-		}
-		for _, answer := range res.Answer {
-			if a, ok := answer.(*dns.A); ok {
-				fmt.Printf("OK resolve from %s (%s -> %s)\n", dnsServer, domain, a.A.String())
-			}
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		msg := &dns.Msg{}
-		msg.SetQuestion(dns.Fqdn(domain), dns.TypeAAAA)
-		dnsServer := "[2606:4700:4700::1111]:53"
-		res, _, err := client.ExchangeContext(ctx, msg, dnsServer)
-		if err != nil {
-			fmt.Printf("NG resolve from %s (%v)\n", dnsServer, err)
-			return
-		}
-		for _, answer := range res.Answer {
-			if a, ok := answer.(*dns.AAAA); ok {
-				fmt.Printf("OK resolve from %s (%s -> %s)\n", dnsServer, domain, a.AAAA.String())
-			}
-		}
-	}()
+	wg.Add(len(addrs))
+	out := make([]*result, len(addrs))
+	for i, addr := range addrs {
+		go func() {
+			defer wg.Done()
+			msg := &dns.Msg{}
+			msg.SetQuestion(dns.Fqdn(domain), dns.TypeA)
+			_, _, err := client.ExchangeContext(ctx, msg, addr)
+			out[i] = &result{Type: "udp", OK: err == nil, Addr: addr}
+		}()
+	}
 	wg.Wait()
+	for _, str := range out {
+		fmt.Println(str)
+	}
+}
+
+func tcp(addrs ...string) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(len(addrs))
+	out := make([]*result, len(addrs))
+	for i, addr := range addrs {
+		go func() {
+			defer wg.Done()
+			conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+			if err == nil {
+				conn.Close()
+			}
+			out[i] = &result{Type: "tcp", OK: err == nil, Addr: addr}
+		}()
+	}
+	wg.Wait()
+	for _, str := range out {
+		fmt.Println(str)
+	}
 }
